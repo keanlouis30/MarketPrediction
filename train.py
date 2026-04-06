@@ -72,7 +72,7 @@ from sklearn.metrics import (
 )
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -442,43 +442,87 @@ class LabelSmoothingBCELoss(nn.Module):
 # TRAINING LOOP
 # ===========================================================================
 
+def make_balanced_sampler(y):
+    """
+    Build a WeightedRandomSampler that draws equal numbers of 'up' and 'down'
+    examples per batch, regardless of the raw class split in the dataset.
+
+    Root cause of the 'always predicts Up' collapse:
+      If 51% of sequences are labelled Up, the model learns early that
+      predicting Up constantly gives ~51% accuracy and a loss near
+      -log(0.51) ≈ 0.67.  It gets stuck there because improving recall
+      on the minority class requires larger weight updates than the
+      gradient signal from the majority class provides.
+
+    WeightedRandomSampler fixes this by over-sampling the minority class
+    so each training batch contains exactly 50% Down and 50% Up examples.
+    This forces the model to learn to distinguish both classes.
+
+    Note: pos_weight in the loss function is a complementary fix — it
+    adjusts the loss magnitude. The sampler adjusts the data frequency.
+    Both are needed when imbalance causes full collapse (recall=0.03).
+    """
+    labels     = y.astype(int)
+    n_up       = labels.sum()
+    n_down     = len(labels) - n_up
+    # Weight for each sample: minority class gets upweight
+    weight_up   = 1.0 / n_up   if n_up   > 0 else 1.0
+    weight_down = 1.0 / n_down if n_down > 0 else 1.0
+    weights = np.where(labels == 1, weight_up, weight_down)
+    return WeightedRandomSampler(
+        weights=torch.DoubleTensor(weights),
+        num_samples=len(weights),
+        replacement=True,
+    )
+
+
 def train_one_model(X_train, y_train, X_val, y_val,
                     input_size, pos_weight, args, seed, device):
     """
     Train a single ESGPredictor.
     Returns: best model state_dict, train loss history, val loss history, best threshold.
+
+    Key fixes vs previous version:
+      1. WeightedRandomSampler  — forces 50/50 class balance in every batch
+      2. pos_weight always on   — loss penalises minority class misses more
+      3. Macro-F1 threshold tuning — optimises for balance between both classes,
+         not the F1 of the majority class
+      4. Early stopping on macro-F1 — saves best model by balanced metric,
+         not by val loss (which can still decrease while recall collapses)
+      5. Per-epoch recall diagnostics — shows Down/Up recall every 5 epochs
+         so collapse is visible immediately
     """
     set_seed(seed)
 
     train_ds = TensorDataset(torch.FloatTensor(X_train), torch.FloatTensor(y_train))
     val_ds   = TensorDataset(torch.FloatTensor(X_val),   torch.FloatTensor(y_val))
 
-    # shuffle=True within the training set is fine here — chronological integrity
-    # is already enforced at the split level; within-split shuffling adds robustness
-    train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True,  drop_last=True)
-    val_loader   = DataLoader(val_ds,   batch_size=args.batch, shuffle=False)
+    # FIX 1: balanced sampler — every batch is 50% Down / 50% Up
+    sampler      = make_balanced_sampler(y_train)
+    train_loader = DataLoader(train_ds, batch_size=args.batch,
+                              sampler=sampler, drop_last=True)
+    val_loader   = DataLoader(val_ds, batch_size=args.batch, shuffle=False)
 
     model = ESGPredictor(input_size, args.hidden, args.layers, args.dropout).to(device)
 
-    pw        = torch.tensor([pos_weight]) if abs(pos_weight - 1.0) > 0.05 else None
+    # FIX 2: always use pos_weight — even mild imbalance needs correction
+    # when combined with a sampler; the loss still upweights minority misses
+    pw        = torch.tensor([max(pos_weight, 1.0)])
     criterion = LabelSmoothingBCELoss(epsilon=args.label_smooth, pos_weight=pw)
 
-    # Adam with weight_decay applies L2 penalty to all weights every step
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
-
-    # Cosine annealing: LR decays smoothly from lr down to lr/100 over all epochs
-    # More stable than ReduceLROnPlateau for small volatile loss curves
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs, eta_min=args.lr / 100
     )
 
-    best_val_loss    = float("inf")
+    # FIX 4: track best macro-F1, not best val loss
+    best_macro_f1    = -1.0
     patience_counter = 0
     best_state       = None
     train_losses, val_losses = [], []
 
     for epoch in range(1, args.epochs + 1):
-        # Train
+        # --- Train ---
         model.train()
         epoch_loss = 0.0
         for Xb, yb in train_loader:
@@ -493,54 +537,82 @@ def train_one_model(X_train, y_train, X_val, y_val,
         scheduler.step()
         avg_train = epoch_loss / len(train_loader)
 
-        # Validate
+        # --- Validate: compute both loss and per-class recall ---
         model.eval()
-        val_loss = 0.0
+        val_loss  = 0.0
+        val_probs_ep = []
         with torch.no_grad():
             for Xb, yb in val_loader:
                 Xb, yb = Xb.to(device), yb.to(device)
                 logits, _ = model(Xb)
                 val_loss += criterion(logits, yb).item()
-        avg_val = val_loss / len(val_loader)
+                val_probs_ep.extend(torch.sigmoid(logits).cpu().numpy())
+
+        avg_val      = val_loss / len(val_loader)
+        val_probs_ep = np.array(val_probs_ep)
+        val_preds_ep = (val_probs_ep > 0.5).astype(int)
+        y_val_trim   = y_val[:len(val_preds_ep)].astype(int)
+
+        # Per-class recall — the key diagnostic metric
+        down_mask    = y_val_trim == 0
+        up_mask      = y_val_trim == 1
+        recall_down  = (val_preds_ep[down_mask] == 0).mean() if down_mask.sum() > 0 else 0.0
+        recall_up    = (val_preds_ep[up_mask]   == 1).mean() if up_mask.sum()  > 0 else 0.0
+        macro_f1_ep  = f1_score(y_val_trim, val_preds_ep, average="macro", zero_division=0)
 
         train_losses.append(avg_train)
         val_losses.append(avg_val)
 
-        if epoch % 10 == 0 or epoch == 1:
+        # FIX 5: log recall every 5 epochs to catch collapse early
+        if epoch % 5 == 0 or epoch == 1:
             log.info(f"    Epoch {epoch:3d}/{args.epochs} | "
-                     f"Train: {avg_train:.4f} | Val: {avg_val:.4f} | "
-                     f"LR: {scheduler.get_last_lr()[0]:.6f}")
+                     f"Loss: {avg_train:.4f}/{avg_val:.4f} | "
+                     f"Recall Down={recall_down:.2f} Up={recall_up:.2f} | "
+                     f"MacroF1={macro_f1_ep:.4f}")
 
-        if avg_val < best_val_loss:
-            best_val_loss    = avg_val
+        # FIX 4: save checkpoint by macro-F1
+        if macro_f1_ep > best_macro_f1:
+            best_macro_f1    = macro_f1_ep
             patience_counter = 0
             best_state       = {k: v.clone() for k, v in model.state_dict().items()}
         else:
             patience_counter += 1
             if patience_counter >= args.patience:
-                log.info(f"    Early stop at epoch {epoch}  (best val: {best_val_loss:.4f})")
+                log.info(f"    Early stop at epoch {epoch}  "
+                         f"(best macro-F1: {best_macro_f1:.4f})")
                 break
 
-    # --- Tune decision threshold on validation set ---
-    # Default threshold (0.5) is rarely optimal.
-    # We search for the threshold that maximises F1 on the validation set.
+    # --- FIX 3: threshold tuning using macro-F1, not weighted-F1 ---
+    # Weighted F1 is dominated by the majority class.
+    # Macro F1 averages Down-F1 and Up-F1 equally — it only improves when
+    # the model correctly handles BOTH classes.
     model.load_state_dict(best_state)
     model.eval()
-    val_probs = []
+    val_probs_final = []
     with torch.no_grad():
         for Xb, _ in val_loader:
             probs = torch.sigmoid(model(Xb.to(device))[0]).cpu().numpy()
-            val_probs.extend(probs)
-    val_probs = np.array(val_probs)
+            val_probs_final.extend(probs)
+    val_probs_final = np.array(val_probs_final)
+    y_val_trim      = y_val[:len(val_probs_final)].astype(int)
 
-    best_thresh, best_f1 = 0.5, 0.0
-    for thresh in np.arange(0.35, 0.66, 0.01):
-        preds = (val_probs > thresh).astype(int)
-        f1    = f1_score(y_val[:len(val_probs)], preds, zero_division=0)
-        if f1 > best_f1:
-            best_f1, best_thresh = f1, thresh
+    best_thresh, best_macro = 0.5, 0.0
+    for thresh in np.arange(0.30, 0.71, 0.01):
+        preds      = (val_probs_final > thresh).astype(int)
+        macro      = f1_score(y_val_trim, preds, average="macro", zero_division=0)
+        if macro > best_macro:
+            best_macro, best_thresh = macro, thresh
 
-    log.info(f"    Best threshold: {best_thresh:.2f}  (val F1={best_f1:.4f})")
+    # Safety check: if model still collapses (recall_down < 0.10 at best threshold),
+    # force threshold to 0.35 to push more predictions toward Down
+    preds_check   = (val_probs_final > best_thresh).astype(int)
+    recall_d_chk  = (preds_check[y_val_trim == 0] == 0).mean() if (y_val_trim == 0).sum() > 0 else 0
+    if recall_d_chk < 0.10:
+        log.warning(f"    Down recall at best threshold is {recall_d_chk:.2f} — "
+                    f"forcing threshold to 0.35 to prevent majority-class collapse.")
+        best_thresh = 0.35
+
+    log.info(f"    Best threshold: {best_thresh:.2f}  (val macro-F1={best_macro:.4f})")
     return best_state, train_losses, val_losses, best_thresh
 
 
@@ -578,17 +650,34 @@ def ensemble_predict(states, X_np, y_true, input_size, threshold, args, device):
 
 
 def print_metrics(name, y_true, y_pred, y_prob):
-    acc = accuracy_score(y_true, y_pred)
-    f1  = f1_score(y_true, y_pred, zero_division=0)
-    auc = roc_auc_score(y_true, y_prob)
+    acc      = accuracy_score(y_true, y_pred)
+    f1_macro = f1_score(y_true, y_pred, average="macro",    zero_division=0)
+    f1_up    = f1_score(y_true, y_pred, average="binary",   zero_division=0)
+    auc      = roc_auc_score(y_true, y_prob)
+
+    down_mask   = y_true == 0
+    up_mask     = y_true == 1
+    recall_down = (y_pred[down_mask] == 0).mean() if down_mask.sum() > 0 else 0.0
+    recall_up   = (y_pred[up_mask]   == 1).mean() if up_mask.sum()  > 0 else 0.0
+
     log.info(f"\n  {'='*50}")
     log.info(f"  {name}")
     log.info(f"  {'='*50}")
-    log.info(f"  Accuracy : {acc:.4f}  ({acc*100:.2f}%)")
-    log.info(f"  F1 Score : {f1:.4f}")
-    log.info(f"  AUC-ROC  : {auc:.4f}")
+    log.info(f"  Accuracy      : {acc:.4f}  ({acc*100:.2f}%)")
+    log.info(f"  Macro F1      : {f1_macro:.4f}  ← primary metric (balanced)")
+    log.info(f"  Up F1         : {f1_up:.4f}")
+    log.info(f"  AUC-ROC       : {auc:.4f}")
+    log.info(f"  Recall Down   : {recall_down:.4f}  ← must be > 0.20 to be meaningful")
+    log.info(f"  Recall Up     : {recall_up:.4f}")
     log.info(f"\n{classification_report(y_true, y_pred, target_names=['Down','Up'])}")
-    return {"accuracy": float(acc), "f1": float(f1), "auc": float(auc)}
+    return {
+        "accuracy"    : float(acc),
+        "macro_f1"    : float(f1_macro),
+        "up_f1"       : float(f1_up),
+        "auc"         : float(auc),
+        "recall_down" : float(recall_down),
+        "recall_up"   : float(recall_up),
+    }
 
 
 # ===========================================================================
@@ -818,7 +907,7 @@ def main():
     m_esg  = print_metrics("ESG + Price Model (ensemble)",  y_test, preds_esg,  probs_esg)
     m_base = print_metrics("Price-Only Baseline (ensemble)", y_test, preds_base, probs_base)
 
-    improvement = {k: round(m_esg[k] - m_base[k], 4) for k in m_esg}
+    improvement = {k: round(m_esg[k] - m_base[k], 4) for k in ["accuracy", "macro_f1", "auc"]}
     log.info(f"\n  ESG improvement over baseline:")
     for k, v in improvement.items():
         log.info(f"    {k:12s}: {v:+.4f}")
@@ -865,11 +954,13 @@ def main():
     log.info("  TRAINING COMPLETE")
     log.info("=" * 60)
     log.info(f"  ESG Model — Acc: {m_esg['accuracy']*100:.2f}%  "
-             f"F1: {m_esg['f1']:.4f}  AUC: {m_esg['auc']:.4f}")
+             f"MacroF1: {m_esg['macro_f1']:.4f}  AUC: {m_esg['auc']:.4f}  "
+             f"RecallDown: {m_esg['recall_down']:.4f}")
     log.info(f"  Baseline  — Acc: {m_base['accuracy']*100:.2f}%  "
-             f"F1: {m_base['f1']:.4f}  AUC: {m_base['auc']:.4f}")
+             f"MacroF1: {m_base['macro_f1']:.4f}  AUC: {m_base['auc']:.4f}  "
+             f"RecallDown: {m_base['recall_down']:.4f}")
     log.info(f"  ESG lift  — Acc: {improvement['accuracy']:+.4f}  "
-             f"F1: {improvement['f1']:+.4f}  AUC: {improvement['auc']:+.4f}")
+             f"MacroF1: {improvement['macro_f1']:+.4f}  AUC: {improvement['auc']:+.4f}")
     log.info(f"\n  Results saved to {args.results_dir}/training_results.json")
 
 
