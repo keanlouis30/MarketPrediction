@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESG Market Prediction — Results Presentation</title>
+
+    <!-- Reveal.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reset.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/theme/black.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg: #0a0e1a;
+            --cyan: #00d4ff;
+            --purple: #7c3aed;
+            --text: #c9cdd4;
+            --muted: #6b7280;
+            --surface: rgba(255,255,255,0.04);
+        }
+
+        /* ── Global Reveal overrides ── */
+        .reveal {
+            font-family: 'Inter', sans-serif;
+            color: var(--text);
+        }
+        .reveal .slides {
+            text-align: left;
+        }
+        .reveal .slides section {
+            padding: 30px 50px;
+            box-sizing: border-box;
+        }
+
+        /* ── Headings ── */
+        .reveal h1, .reveal h2, .reveal h3, .reveal h4 {
+            font-family: 'Outfit', sans-serif;
+            text-transform: none;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--cyan), var(--purple));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.4em;
+        }
+        .reveal h1 { font-size: 2.2em; }
+        .reveal h2 { font-size: 1.5em; }
+        .reveal h3 { font-size: 1.1em; }
+        .reveal h4 { font-size: 0.95em; }
+
+        /* ── Body text ── */
+        .reveal p,
+        .reveal li {
+            font-size: 0.62em;
+            line-height: 1.55;
+            color: var(--text);
+        }
+        .reveal ul { margin-left: 0.6em; padding-left: 0.8em; }
+        .reveal li { margin-bottom: 0.35em; }
+
+        /* ── Utility classes ── */
+        .highlight { color: var(--cyan); font-weight: 600; }
+        .accent    { color: var(--purple); font-weight: 600; }
+        .muted     { color: var(--muted); font-size: 0.85em; }
+        .big-num   { font-size: 2.4em; font-weight: 800; font-family: 'Outfit', sans-serif; line-height: 1; }
+
+        /* ── Layout helpers ── */
+        .row {
+            display: flex;
+            gap: 20px;
+            width: 100%;
+        }
+        .row > * { flex: 1; min-width: 0; }
+
+        /* ── Card / glass component ── */
+        .compact p  { font-size: 0.55em; line-height: 1.45; }
+        .compact li { font-size: 0.55em; }
+        .compact h4 { font-size: 0.85em; margin-bottom: 4px; }
+        .compact .card { padding: 14px 18px; margin-bottom: 8px; }
+        .compact table { font-size: 0.52em; }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 20px 24px;
+            margin-bottom: 14px;
+        }
+        .card h4 { margin-top: 0; }
+
+        /* ── Metric pill (side-by-side stats) ── */
+        .metric-row {
+            display: flex;
+            gap: 16px;
+            margin: 16px 0;
+        }
+        .metric-pill {
+            flex: 1;
+            background: var(--surface);
+            border-left: 3px solid var(--purple);
+            border-radius: 6px;
+            padding: 14px 18px;
+            text-align: center;
+        }
+        .metric-pill .label { font-size: 0.55em; color: var(--muted); margin-bottom: 2px; }
+        .metric-pill .value { font-size: 1.3em; font-weight: 700; font-family: 'Outfit'; }
+
+        /* ── Subtle divider ── */
+        .divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+            margin: 14px 0;
+        }
+
+        /* ── Tag / badge ── */
+        .tag {
+            display: inline-block;
+            font-size: 0.5em;
+            padding: 3px 10px;
+            border-radius: 20px;
+            background: rgba(124,58,237,0.15);
+            color: var(--purple);
+            border: 1px solid rgba(124,58,237,0.25);
+            font-weight: 600;
+            margin-right: 4px;
+        }
+
+        /* ── Table inside slides ── */
+        .reveal table {
+            width: 100%;
+            font-size: 0.58em;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .reveal th {
+            text-align: left;
+            padding: 6px 10px;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+            color: var(--cyan);
+            font-weight: 600;
+        }
+        .reveal td {
+            padding: 5px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+
+        /* ── Title slide specifics ── */
+        .title-slide { text-align: center; }
+        .title-slide h1 { font-size: 2.6em; margin-bottom: 0.1em; }
+        .title-slide h3 { font-size: 1em; font-weight: 400; }
+        .title-slide .sub {
+            margin-top: 30px;
+            font-size: 0.6em;
+            color: var(--muted);
+        }
+
+        /* ── Fragment fade-up default ── */
+        .reveal .fragment { transition: all 0.35s ease; }
+    </style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ════════════════════════════════════════════════════════════
+     SLIDE 1 — TITLE
+     ════════════════════════════════════════════════════════════ -->
+<section class="title-slide" data-background-color="#0a0e1a">
+    <div style="margin-top: 60px;">
+        <h1>ESG & Market Dynamics</h1>
+        <h3 style="-webkit-text-fill-color: var(--text); background: none;">
+            Predicting Stock Direction with Deep Learning
+        </h3>
+        <div class="divider" style="max-width: 300px; margin: 24px auto;"></div>
+        <p class="sub">LSTM + Attention · 700 Stocks · Walk-Forward Validation</p>
+    </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SLIDE 2 — WHY
+     ════════════════════════════════════════════════════════════ -->
+<section data-background-color="#0a0e1a">
+    <h2>Why did we do this?</h2>
+    <div class="card">
+        <p style="margin:0"><strong>The Gap:</strong> Most financial ML relies solely on price-based technical indicators.
+        We hypothesized that <span class="highlight">ESG scores</span> encode latent risks
+        and institutional sentiment that aren't captured by price alone.</p>
+    </div>
+
+    <div class="divider"></div>
+
+    <p style="margin-bottom: 6px;"><strong>Research Questions</strong></p>
+    <ul>
+        <li class="fragment fade-up">Can non-traditional, qualitative data provide a <span class="highlight">verifiable edge</span> over pure price models?</li>
+        <li class="fragment fade-up">Does strong ESG compliance act as a buffer against downward price moves?</li>
+        <li class="fragment fade-up">Can deep learning (LSTM + Attention) extract this signal from noisy market data?</li>
+    </ul>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SLIDE 3 — WHAT
+     ════════════════════════════════════════════════════════════ -->
+<section data-background-color="#0a0e1a">
+    <h2>What did we do?</h2>
+    <div class="row">
+        <div class="card">
+            <h4>Data Setup</h4>
+            <ul>
+                <li><span class="highlight">700+</span> US-listed stocks (2020 – 2023)</li>
+                <li>ESG scores (Environment, Social, Governance) from Finnhub</li>
+                <li>Daily OHLCV prices via Yahoo Finance</li>
+                <li>Binary label: price <span class="highlight">Up</span> or <span class="accent">Down</span> in 5 trading days</li>
+            </ul>
+        </div>
+        <div class="card">
+            <h4>Experimental Design</h4>
+            <ul>
+                <li><strong>ESG Model</strong> — 28 features (price + ESG + derived)</li>
+                <li><strong>Baseline</strong> — 9 price-only technical features</li>
+                <li>3-seed ensemble for statistical stability</li>
+                <li>Strict chronological walk-forward split</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SLIDE 3b — DATA EXPLORATION (Figures)
+     ════════════════════════════════════════════════════════════ -->
+<section>
+    <section data-background-color="#0a0e1a" class="compact">
+        <h2>Data Exploration</h2>
+        <p class="muted" style="margin-top:-6px">ESG score & grade distributions across 700+ stocks</p>
+        <div class="row" style="gap:14px; align-items:center;">
+            <div style="flex:1; text-align:center;">
+                <img src="results/figures/esg_score_distributions.png" alt="ESG Score Distributions"
+                     style="max-width:100%; max-height:400px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                <p style="font-size:0.45em; color:var(--muted); margin-top:4px;">ESG Score Distributions (normalised)</p>
+            </div>
+            <div style="flex:1; text-align:center;">
+                <img src="results/figures/esg_grade_distributions.png" alt="ESG Grade Distributions"
+                     style="max-width:100%; max-height:400px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                <p style="font-size:0.45em; color:var(--muted); margin-top:4px;">ESG Grade Distributions</p>
+            </div>
+        </div>
+    </section>
+
+    <section data-background-color="#0a0e1a" class="compact">
+        <h2>Data Exploration</h2>
+        <p class="muted" style="margin-top:-6px">Industry concentration & feature quality</p>
+        <div class="row" style="gap:14px; align-items:center;">
+            <div style="flex:1; text-align:center;">
+                <img src="results/figures/industry_distribution.png" alt="Industry Distribution"
+                     style="max-width:100%; max-height:400px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                <p style="font-size:0.45em; color:var(--muted); margin-top:4px;">Top 15 Industries in Dataset</p>
+            </div>
+            <div style="flex:1; text-align:center;">
+                <img src="results/figures/feature_distributions_post_norm.png" alt="Feature Distributions Post-Normalisation"
+                     style="max-width:100%; max-height:400px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                <p style="font-size:0.45em; color:var(--muted); margin-top:4px;">Feature Distributions (post-normalisation)</p>
+            </div>
+        </div>
+    </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SLIDE 4a — HOW (Overfitting Problem)
+     ════════════════════════════════════════════════════════════ -->
+<section>
+    <section data-background-color="#0a0e1a" class="compact">
+        <h2>How did we do it?</h2>
+        <p class="muted" style="margin-top:-6px">Part 1 — Overcoming the overfitting trap</p>
+
+        <div class="card" style="border-left: 3px solid #ef4444; padding: 10px 16px;">
+            <p style="margin:0"><strong>Problem:</strong> Model reached 55 % but <span style="color:#ef4444;font-weight:600">overfitted by epoch 5</span> — memorised training data, predicted "Up" almost exclusively.</p>
+        </div>
+
+        <p style="margin-bottom: 4px; font-size: 0.6em;"><strong>Fixes Applied</strong></p>
+        <table>
+            <tr><th>Fix</th><th>Effect</th></tr>
+            <tr class="fragment fade-up"><td><span class="tag">Architecture</span> Hidden 64→32, Layers 2→1</td><td>Less memorisation capacity</td></tr>
+            <tr class="fragment fade-up"><td><span class="tag">Dropout</span> 0.3 → 0.5</td><td>Stronger regularisation</td></tr>
+            <tr class="fragment fade-up"><td><span class="tag">Balanced Sampler</span></td><td>50/50 Up/Down per batch</td></tr>
+            <tr class="fragment fade-up"><td><span class="tag">Label Smoothing</span> ε = 0.1</td><td>No overconfident predictions</td></tr>
+            <tr class="fragment fade-up"><td><span class="tag">Grad Clip</span> 0.5</td><td>Stable weight updates</td></tr>
+        </table>
+    </section>
+
+    <!-- SLIDE 4b — HOW (Feature Engineering) -->
+    <section data-background-color="#0a0e1a" class="compact">
+        <h2>How did we do it?</h2>
+        <p class="muted" style="margin-top:-6px">Part 2 — Feature engineering & subsampling</p>
+
+        <div class="row">
+            <div class="card">
+                <h4>Industry-Relative ESG</h4>
+                <p>Converted raw scores to <span class="highlight">z-scores within each industry</span> — captures whether a stock leads or lags its sector peers.</p>
+            </div>
+            <div class="card">
+                <h4>7 Window Features</h4>
+                <p>MACD, Bollinger position, OBV momentum, skewness, kurtosis, trend strength, volatility trend — all computed <em>within</em> each 30-day window.</p>
+            </div>
+        </div>
+
+        <div class="card fragment fade-up">
+            <h4>Sequence Subsampling</h4>
+            <p>Adjacent windows overlap by 97 %. Keeping every 3rd sequence forces the LSTM to learn <span class="highlight">general patterns</span> instead of memorising dates.</p>
+        </div>
+    </section>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SLIDE 5 — RESULTS
+     ════════════════════════════════════════════════════════════ -->
+<section data-background-color="#0a0e1a">
+    <h2>What are the results?</h2>
+
+    <div class="metric-row">
+        <div class="metric-pill">
+            <div class="label">ESG + Price Model</div>
+            <div class="value accent" style="-webkit-text-fill-color: var(--purple)">54.52 %</div>
+            <div class="label" style="margin-top:2px">Accuracy</div>
+        </div>
+        <div class="metric-pill">
+            <div class="label">Price-Only Baseline</div>
+            <div class="value highlight" style="-webkit-text-fill-color: var(--cyan)">54.46 %</div>
+            <div class="label" style="margin-top:2px">Accuracy</div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="card">
+            <h4>Why 54.5 % > the old 55 %</h4>
+            <p>The initial 55 % was a collapsed model predicting "Up" on
+            nearly every sample. Our new model achieves
+            <strong>balanced recall</strong>:</p>
+            <ul>
+                <li>Recall Up: <span class="accent">54.76 %</span></li>
+                <li>Recall Down: <span class="accent">54.28 %</span></li>
+            </ul>
+        </div>
+        <div class="card">
+            <h4>ESG's Measurable Edge</h4>
+            <table>
+                <tr><th>Metric</th><th>ESG</th><th>Baseline</th><th>Δ</th></tr>
+                <tr><td>AUC-ROC</td><td class="accent">0.5645</td><td>0.5621</td><td>+0.0024</td></tr>
+                <tr><td>Macro-F1</td><td class="accent">0.5452</td><td>0.5445</td><td>+0.0006</td></tr>
+                <tr><td>Accuracy</td><td class="accent">54.52 %</td><td>54.46 %</td><td>+0.06 %</td></tr>
+            </table>
+        </div>
+    </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SLIDE 6 — FUTURE
+     ════════════════════════════════════════════════════════════ -->
+<section data-background-color="#0a0e1a" class="compact">
+    <h2>What does this mean for the future?</h2>
+
+    <div class="card fragment fade-up">
+        <h4>1 · Reliable, Leakage-Free Pipeline</h4>
+        <p>Battle-tested PyTorch pipeline resistant to time leakage, class collapse, and overfitting.</p>
+    </div>
+
+    <div class="card fragment fade-up">
+        <h4>2 · Expanding Alternative Data</h4>
+        <p>Next steps: <span class="highlight">Temporal Fusion Transformers</span>, NLP sentiment (news & earnings calls), and time-varying ESG scores.</p>
+    </div>
+
+    <div class="card fragment fade-up">
+        <h4>3 · Real-World Deployment</h4>
+        <p>A verified 54.5 % edge without look-ahead bias can power an algorithmic trading strategy with Kelly Criterion sizing.</p>
+    </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SLIDE 7 — END
+     ════════════════════════════════════════════════════════════ -->
+<section class="title-slide" data-background-color="#0a0e1a">
+    <div style="margin-top: 80px;">
+        <h1>Thank You</h1>
+        <p style="font-size: 0.7em; color: var(--muted); margin-top: 20px;">Questions?</p>
+    </div>
+</section>
+
+</div><!-- /slides -->
+</div><!-- /reveal -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.js"></script>
+<script>
+    Reveal.initialize({
+        hash: true,
+        transition: 'fade',
+        transitionSpeed: 'default',
+        backgroundTransition: 'none',
+        width: 1280,
+        height: 720,
+        margin: 0.04,
+        minScale: 0.2,
+        maxScale: 1.5,
+        center: false,
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+  "config": {
+    "hidden_size": 32,
+    "num_layers": 1,
+    "dropout": 0.5,
+    "label_smoothing": 0.1,
+    "subsample_n": 3,
+    "n_ensemble": 3,
+    "seeds": [
+      42,
+      123,
+      456
+    ],
+    "esg_threshold": 0.49000000000000016,
+    "base_threshold": 0.49333333333333357,
+    "num_features": 28
+  },
+  "esg_model": {
+    "accuracy": 0.5451884491305374,
+    "macro_f1": 0.5451607377264436,
+    "up_f1": 0.5487109820271389,
+    "auc": 0.5645065087968734,
+    "recall_down": 0.5427554199249793,
+    "recall_up": 0.5475737837753607
+  },
+  "baseline_model": {
+    "accuracy": 0.5445589739554646,
+    "macro_f1": 0.5445113153272285,
+    "up_f1": 0.5491704961445596,
+    "auc": 0.5621216112720497,
+    "recall_down": 0.5396719435437727,
+    "recall_up": 0.5493502041325147
+  },
+  "improvement": {
+    "accuracy": 0.0006,
+    "macro_f1": 0.0006,
+    "auc": 0.0024
+  }
+}
